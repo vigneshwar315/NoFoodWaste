@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import toast from 'react-hot-toast';
-import { Eye, EyeOff, UserPlus } from 'lucide-react';
+import { Eye, EyeOff, UserPlus, ArrowLeft } from 'lucide-react';
 
 export default function VolunteerRegister() {
   const { registerVolunteer } = useAuth();
@@ -55,54 +55,76 @@ export default function VolunteerRegister() {
   ];
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-green-900 via-green-800 to-teal-900 flex items-center justify-center p-4 py-12">
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-green-900 via-green-800 to-teal-900 px-4 py-12">
+
       <div className="w-full max-w-lg">
-        <div className="bg-white rounded-3xl shadow-2xl overflow-hidden">
-          {/* Header */}
-          <div className="bg-gradient-to-r from-green-500 to-emerald-700 p-8 text-white text-center">
-            <div className="w-16 h-16 bg-white/20 rounded-2xl flex items-center justify-center text-3xl mx-auto mb-4">🤝</div>
-            <h1 className="text-2xl font-black">Register as Volunteer</h1>
-            <p className="text-green-100 text-sm mt-1">Join our community and make a difference</p>
+
+        {/* Back */}
+        <Link
+          to="/login"
+          className="flex items-center gap-2 text-sm text-white/80 hover:text-white mb-8"
+        >
+          <ArrowLeft className="w-4 h-4" />
+          Back
+        </Link>
+
+        {/* Card */}
+        <div className="bg-white rounded-2xl shadow-lg px-12 py-12">
+
+          {/* Icon */}
+          <div className="flex justify-center mb-6">
+            <div className="w-14 h-14 flex items-center justify-center rounded-full bg-green-100">
+              <span className="text-2xl">🤝</span>
+            </div>
           </div>
 
-          <form onSubmit={handleSubmit} className="p-8 space-y-4">
+          {/* Title */}
+          <h1 className="text-2xl font-semibold text-gray-800 text-center mb-10">
+            Register as Volunteer
+          </h1>
+
+          {/* Form */}
+          <form onSubmit={handleSubmit} className="space-y-5">
+
             {fields.map((f) => (
               <div key={f.key}>
-                <label className="block text-sm font-semibold text-gray-700 mb-1.5">{f.label}</label>
+                <label className="block text-sm font-medium text-gray-700 mb-2">{f.label}</label>
                 <input
                   type={f.type}
                   placeholder={f.placeholder}
                   value={form[f.key]}
                   onChange={(e) => set(f.key, e.target.value)}
-                  className="form-input"
+                  className="w-full h-13 px-4 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-green-600"
                 />
               </div>
             ))}
 
             {/* Password */}
             <div>
-              <label className="block text-sm font-semibold text-gray-700 mb-1.5">Password *</label>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Password *</label>
               <div className="relative">
                 <input
                   type={showPass ? 'text' : 'password'}
                   placeholder="Min. 6 characters"
                   value={form.password}
                   onChange={(e) => set('password', e.target.value)}
-                  className="form-input pr-12"
+                  className="w-full h-13 px-4 pr-10 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-green-600"
                 />
-                <button type="button" onClick={() => setShowPass(!showPass)} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
-                  {showPass ? <EyeOff size={18} /> : <Eye size={18} />}
+                <button type="button" onClick={() => setShowPass(!showPass)} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500">
+                  {showPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
               </div>
             </div>
+
+            {/* Confirm Password */}
             <div>
-              <label className="block text-sm font-semibold text-gray-700 mb-1.5">Confirm Password *</label>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Confirm Password *</label>
               <input
                 type="password"
                 placeholder="Repeat password"
                 value={form.confirmPassword}
                 onChange={(e) => set('confirmPassword', e.target.value)}
-                className="form-input"
+                className="w-full h-13 px-4 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-green-600"
               />
             </div>
 
@@ -110,16 +132,29 @@ export default function VolunteerRegister() {
               ✅ After registration, admin will verify your account. You can still view your dashboard.
             </p>
 
-            <button type="submit" disabled={loading} className="w-full bg-green-500 hover:bg-green-600 disabled:opacity-60 text-white font-bold py-3 rounded-xl transition-all flex items-center justify-center gap-2">
-              {loading ? <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <><UserPlus size={18} /> Create Volunteer Account</>}
+            {/* Button */}
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full h-13 bg-green-500 hover:bg-green-600 disabled:opacity-60 text-white rounded-md text-sm font-medium transition flex items-center justify-center gap-2"
+            >
+              {loading
+                ? <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                : <><UserPlus size={16} /> Create Volunteer Account</>}
             </button>
 
             <div className="text-center pt-2 border-t border-gray-100 space-y-1">
               <p className="text-gray-500 text-sm">Already registered? <Link to="/login/volunteer" className="text-green-600 font-semibold hover:underline">Login here</Link></p>
-              <Link to="/login" className="text-orange-500 hover:underline text-sm font-medium block">← Back to Login Portal</Link>
             </div>
+
           </form>
         </div>
+
+        {/* Footer */}
+        <p className="text-center text-white/60 text-sm mt-6">
+          Join our community and make a difference
+        </p>
+
       </div>
     </div>
   );
