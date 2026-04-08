@@ -11,6 +11,7 @@
   "license": "ISC",
   "description": "No Food Waste Management System - Backend",
   "dependencies": {
+    "axios": "^1.15.0",
     "bcryptjs": "^2.4.3",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.6",
@@ -21,6 +22,7 @@
     "mongoose": "^8.13.2",
     "morgan": "^1.10.0",
     "multer": "^1.4.5-lts.2",
+    "node-cron": "^4.2.1",
     "nodemon": "^3.1.11",
     "socket.io": "^4.8.1"
   }

@@ -8,9 +8,15 @@ const { Server } = require('socket.io');
 
 const connectDB = require('./config/db');
 const { seedAdmin } = require('./controllers/authController');
+const { startCronJobs } = require('./services/cronService');
 
+// Routes
 const authRoutes = require('./routes/authRoutes');
 const adminRoutes = require('./routes/adminRoutes');
+const donationRoutes = require('./routes/donationRoutes');
+const deliveryRoutes = require('./routes/deliveryRoutes');
+const hungerSpotRoutes = require('./routes/hungerSpotRoutes');
+const dailyDonorRoutes = require('./routes/dailyDonorRoutes');
 
 const app = express();
 const server = http.createServer(app);
@@ -19,12 +25,12 @@ const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
     origin: process.env.CLIENT_URL || 'http://localhost:5173',
-    methods: ['GET', 'POST'],
+    methods: ['GET', 'POST', 'PUT'],
     credentials: true,
   },
 });
 
-// Store io globally for use in controllers
+// Store io globally for use in services/controllers
 global.io = io;
 
 // ─── Middleware ───────────────────────────────────────────────────────────────
@@ -45,10 +51,14 @@ app.use('/uploads', express.static('uploads'));
 // ─── Routes ───────────────────────────────────────────────────────────────────
 app.use('/api/auth', authRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/donations', donationRoutes);
+app.use('/api/delivery', deliveryRoutes);
+app.use('/api/hunger-spots', hungerSpotRoutes);
+app.use('/api/daily-donors', dailyDonorRoutes);
 
 // Health check
 app.get('/', (req, res) => {
-  res.json({ success: true, message: '🍱 No Food Waste API is running!', version: '1.0.0' });
+  res.json({ success: true, message: '🍱 No Food Waste API is running!', version: '2.0.0' });
 });
 
 // 404 handler
@@ -69,14 +79,43 @@ app.use((err, req, res, next) => {
 io.on('connection', (socket) => {
   console.log(`🔌 Socket connected: ${socket.id}`);
 
+  // Join a specific room (donation, driver, employee group)
   socket.on('join_room', (roomId) => {
     socket.join(roomId);
     console.log(`📌 Socket ${socket.id} joined room: ${roomId}`);
   });
 
+  // Join employee broadcast room
+  socket.on('join_employee_room', () => {
+    socket.join('employees');
+    console.log(`👨‍💼 Employee socket ${socket.id} joined employees room`);
+  });
+
+  // Join donation-specific room (donor tracking)
+  socket.on('join_donation_room', (donationId) => {
+    socket.join(`donation_${donationId}`);
+    console.log(`🍱 Socket ${socket.id} joined donation room: donation_${donationId}`);
+  });
+
+  // Join driver personal room (for assignment notifications)
+  socket.on('join_driver_room', (driverId) => {
+    socket.join(`driver_${driverId}`);
+    console.log(`🚚 Driver socket ${socket.id} joined driver room: driver_${driverId}`);
+  });
+
+  // Join delivery tracking room
+  socket.on('join_delivery_room', (deliveryId) => {
+    socket.join(`delivery_${deliveryId}`);
+    console.log(`📍 Socket ${socket.id} joined delivery room: delivery_${deliveryId}`);
+  });
+
+  // Driver broadcasts location (via socket, not REST)
   socket.on('driver_location_update', (data) => {
-    // Broadcast driver location to all in the room
-    io.to(`delivery_${data.deliveryId}`).emit('location_updated', data);
+    // data: { driverId, deliveryId, coordinates: [lng, lat] }
+    io.to(`delivery_${data.deliveryId}`).emit('locationUpdate', {
+      ...data,
+      timestamp: new Date(),
+    });
   });
 
   socket.on('disconnect', () => {
@@ -90,10 +129,12 @@ const PORT = process.env.PORT || 5000;
 const start = async () => {
   await connectDB();
   await seedAdmin();
+  startCronJobs();
 
   server.listen(PORT, () => {
     console.log(`🚀 Server running on http://localhost:${PORT}`);
     console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
+    console.log(`🗺️  Google Maps: ${process.env.GOOGLE_MAPS_API_KEY ? '✅ Configured' : '⚠️ Not set — using Haversine fallback'}`);
   });
 };
 

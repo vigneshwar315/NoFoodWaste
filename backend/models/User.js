@@ -98,8 +98,6 @@ const userSchema = new mongoose.Schema(
 // Indexes
 userSchema.index({ currentLocation: '2dsphere' });
 userSchema.index({ role: 1 });
-userSchema.index({ phone: 1 });
-userSchema.index({ username: 1 });
 
 // Hash password before saving
 userSchema.pre('save', async function (next) {

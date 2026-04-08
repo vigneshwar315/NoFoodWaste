@@ -7,61 +7,75 @@ const donationSchema = new mongoose.Schema(
       ref: 'User',
       required: true,
     },
+    // Employee who created/verified this donation
     createdBy: {
-      // Employee or Admin who logged it
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
       default: null,
     },
-    foodDescription: {
+    verifiedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      default: null,
+    },
+    assignedEmployee: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      default: null,
+    },
+
+    // Food details (filled during verification)
+    foodDescription: { type: String, default: '' },
+    foodType: {
       type: String,
-      required: [true, 'Food description is required'],
+      enum: ['veg', 'non-veg', 'vegan', 'mixed', ''],
+      default: '',
     },
     quantity: {
       type: Number,
-      required: [true, 'Quantity (number of people) is required'],
-      min: [30, 'Minimum donation must feed 30 people'],
+      required: [true, 'Quantity is required'],
     },
-    preparedAt: {
-      type: Date,
-      required: [true, 'Preparation time is required'],
-    },
-    expiresAt: {
-      type: Date, // preparedAt + 4 hours (FSSAI guideline)
-    },
-    images: [{ type: String }],
-    pickupAddress: {
-      type: String,
-      required: true,
-    },
+    exactQuantity: { type: Number, default: null }, // confirmed by employee
+    preparedAt: { type: Date, default: null },
+    expiresAt: { type: Date, default: null },
+
+    // Location
+    pickupAddress: { type: String, default: '' },
     pickupLocation: {
-      type: {
-        type: String,
-        enum: ['Point'],
-        default: 'Point',
-      },
-      coordinates: {
-        type: [Number],
-        default: [0, 0],
-      },
+      type: { type: String, enum: ['Point'], default: 'Point' },
+      coordinates: { type: [Number], default: [0, 0] },
     },
+
+    // Images
+    images: [{ type: String }],
+
+    // Lifecycle status
     status: {
       type: String,
       enum: [
-        'pending',
-        'assigned',
-        'picked_up',
-        'delivered',
-        'rejected',
-        'expired',
-        'cancelled',
+        'pending_verification', // IVR received, awaiting employee call
+        'verified',             // Employee filled details
+        'validated',            // ETA OK, approved
+        'assigned',             // Driver assigned
+        'picked',               // Driver picked up food
+        'in_transit',           // En route to hunger spot
+        'delivered',            // Successfully delivered
+        'failed',               // Could not deliver
+        'rejected',             // Rejected (employee / system)
+        'expired',              // Food expired before delivery
       ],
-      default: 'pending',
+      default: 'pending_verification',
     },
-    rejectionReason: {
-      type: String,
-      default: '',
-    },
+
+    rejectionReason: { type: String, default: '' },
+    verificationNotes: { type: String, default: '' },
+
+    // ETA & decision engine
+    etaSeconds: { type: Number, default: null },
+    etaWarning: { type: Boolean, default: false }, // true if ETA > remainingTime
+    forceApproved: { type: Boolean, default: false }, // admin override
+
+    // Assignments
     assignedDriver: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
@@ -77,21 +91,29 @@ const donationSchema = new mongoose.Schema(
       ref: 'HungerSpot',
       default: null,
     },
-    scheduledFor: {
-      type: Date,
+
+    // Daily donor link
+    dailyDonorId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'DailyDonor',
       default: null,
     },
-    isScheduled: {
-      type: Boolean,
-      default: false,
+    isScheduled: { type: Boolean, default: false },
+    scheduledFor: { type: Date, default: null },
+
+    // Source tracking
+    source: {
+      type: String,
+      enum: ['ivr', 'manual', 'scheduled', 'web'],
+      default: 'ivr',
     },
   },
   { timestamps: true }
 );
 
-// Auto-compute expiresAt before saving
+// Auto-compute expiresAt = preparedAt + 4 hours (FSSAI rule)
 donationSchema.pre('save', function (next) {
-  if (this.isModified('preparedAt') || !this.expiresAt) {
+  if (this.preparedAt && (this.isModified('preparedAt') || !this.expiresAt)) {
     this.expiresAt = new Date(this.preparedAt.getTime() + 4 * 60 * 60 * 1000);
   }
   next();
@@ -100,5 +122,7 @@ donationSchema.pre('save', function (next) {
 donationSchema.index({ pickupLocation: '2dsphere' });
 donationSchema.index({ status: 1 });
 donationSchema.index({ donor: 1 });
+donationSchema.index({ assignedDriver: 1 });
+donationSchema.index({ expiresAt: 1 });
 
 module.exports = mongoose.model('Donation', donationSchema);
