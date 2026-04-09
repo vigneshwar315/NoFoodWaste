@@ -72,10 +72,19 @@ export default function EmployeeDashboard() {
     refreshStats();
     refreshAll();
     refreshActiveDeliveries();
+
+    // Auto-refresh every 30s so missed socket events are caught
+    const interval = setInterval(() => {
+      refreshPending();
+      refreshStats();
+    }, 30000);
+
+    return () => clearInterval(interval);
   }, []);
 
+
   // Socket.io — listen for new donations
-  useSocket({
+  const { emit } = useSocket({
     rooms: [],
     listeners: {
       newDonationRequest: (data) => {
@@ -91,11 +100,11 @@ export default function EmployeeDashboard() {
     },
   });
 
-  // Join employee room on mount
+  // Join the employees broadcast room so Exotel webhook notifications arrive
   useEffect(() => {
-    const { io } = require('socket.io-client');
-    // Handled via useSocket, just emit join
-  }, []);
+    emit('join_employee_room');
+  }, [emit]);
+
 
   const handleVerify = async () => {
     if (!selected) return;

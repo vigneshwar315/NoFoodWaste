@@ -10,14 +10,13 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@react-google-maps/api": "^2.20.8",
     "@tailwindcss/vite": "^4.2.2",
     "axios": "^1.13.6",
-    "leaflet": "^1.9.4",
     "lucide-react": "^1.6.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-hot-toast": "^2.6.0",
-    "react-leaflet": "^5.0.0",
     "react-router-dom": "^7.13.2",
     "socket.io-client": "^4.8.3",
     "tailwindcss": "^4.2.2"

@@ -198,6 +198,16 @@ const updateDriverLocation = async (driverId, coordinates) => {
     });
   }
 
+  // Broadcast to admin room for real-time live map
+  if (global.io) {
+    global.io.to('admins').emit('driverLocationUpdate', {
+      driverId,
+      coordinates,
+      deliveryId: delivery?._id || null,
+      timestamp: new Date(),
+    });
+  }
+
   return { updated: true, delivery: delivery?._id };
 };
 

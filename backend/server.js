@@ -91,6 +91,12 @@ io.on('connection', (socket) => {
     console.log(`👨‍💼 Employee socket ${socket.id} joined employees room`);
   });
 
+  // Join admin broadcast room (receives real-time driver location updates for live map)
+  socket.on('join_admin_room', () => {
+    socket.join('admins');
+    console.log(`👑 Admin socket ${socket.id} joined admins room`);
+  });
+
   // Join donation-specific room (donor tracking)
   socket.on('join_donation_room', (donationId) => {
     socket.join(`donation_${donationId}`);

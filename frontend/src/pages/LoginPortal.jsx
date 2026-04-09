@@ -173,18 +173,22 @@ export default function LoginPortal() {
                       </span>
 
                       {role.registerLink && (
-                        <Link
-                          to={role.registerLink}
-                          onClick={(e) => e.stopPropagation()}
-                          className="text-gray-500 text-xs hover:text-gray-700 flex items-center gap-1"
+                        /* Use a span styled as link to avoid nested <a> — clicking navigates via window.location */
+                        <span
+                          role="link"
+                          tabIndex={0}
+                          onClick={(e) => { e.preventDefault(); e.stopPropagation(); window.location.href = role.registerLink; }}
+                          onKeyDown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); window.location.href = role.registerLink; } }}
+                          className="text-gray-500 text-xs hover:text-gray-700 flex items-center gap-1 cursor-pointer"
                         >
                           Register
                           <ChevronRight className="w-3 h-3" />
-                        </Link>
+                        </span>
                       )}
                     </div>
                   </div>
                 </Link>
+
               );
             })}
           </div>

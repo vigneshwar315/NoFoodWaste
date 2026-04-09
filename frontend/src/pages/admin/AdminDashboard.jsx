@@ -4,9 +4,9 @@ import { useAuth } from '../../context/AuthContext';
 import { useSocket } from '../../hooks/useSocket';
 import StatusBadge from '../../components/StatusBadge';
 import toast from 'react-hot-toast';
-import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
-import L from 'leaflet';
-import 'leaflet/dist/leaflet.css';
+import { GoogleMap, MarkerF, InfoWindowF } from '@react-google-maps/api';
+import { useGoogleMaps } from '../../context/GoogleMapsContext';
+
 import { getDonationStats, getAllDonations } from '../../services/donationService';
 import {
   getAllDeliveries, getHungerSpots, createHungerSpot, deleteHungerSpot,
@@ -16,21 +16,11 @@ import { authAPI, adminAPI } from '../../services/api';
 import {
   Shield, LogOut, RefreshCw, MapPin, Truck, Package, Users,
   TrendingUp, PlusCircle, Trash2, Zap, BarChart3, Navigation,
-  UserPlus, Search, ShieldCheck, UserCheck, UserX, Eye, EyeOff
+  UserPlus, Search, ShieldCheck, UserCheck, UserX, Eye, EyeOff, Pencil, X
 } from 'lucide-react';
 
-delete L.Icon.Default.prototype._getIconUrl;
-L.Icon.Default.mergeOptions({
-  iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
-  iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
-  shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
-});
 
-const driverIcon = new L.Icon({
-  iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-blue.png',
-  shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
-  iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34],
-});
+
 
 const TABS = ['Overview', 'Live Map', 'Donations', 'Hunger Spots', 'Daily Donors', 'Register Team', 'Users'];
 
@@ -67,6 +57,20 @@ export default function AdminDashboard() {
   const [userSearch, setUserSearch] = useState('');
   const [userPage, setUserPage] = useState(1);
   const [userTotalPages, setUserTotalPages] = useState(1);
+
+  // ── Edit User state ────────────────────────────────────────────────────────
+  const [editUser, setEditUser] = useState(null);   // null = modal closed
+  const [editForm, setEditForm] = useState({});
+  const [editLoading, setEditLoading] = useState(false);
+  const [showEditPass, setShowEditPass] = useState(false);
+
+  // ── Live Map state ─────────────────────────────────────────────────────────
+  const [allDrivers, setAllDrivers] = useState([]);       // all drivers from DB
+  const [liveLocations, setLiveLocations] = useState({}); // { driverId: { coordinates, timestamp } }
+  const [selectedDriver, setSelectedDriver] = useState(null); // driver info popup
+
+  // Load Google Maps JS API — provided once at app root via GoogleMapsProvider
+  const { isLoaded: mapsLoaded } = useGoogleMaps();
 
   const refresh = useCallback(async () => {
     try {
@@ -108,17 +112,49 @@ export default function AdminDashboard() {
     } catch (_) {}
   }, []);
 
-  useEffect(() => { refresh(); fetchUserStats(); }, []);
+  // Fetch all drivers with their stored currentLocation
+  const fetchAllDrivers = useCallback(async () => {
+    try {
+      const { data } = await adminAPI.getUsers({ role: 'driver', limit: 100 });
+      setAllDrivers(data.users || []);
+    } catch (_) {}
+  }, []);
+
+  useEffect(() => { refresh(); fetchUserStats(); fetchAllDrivers(); }, []);
   useEffect(() => { if (activeTab === 6) { fetchUsers(filterRole, userPage); } }, [activeTab, filterRole, userPage]);
 
-  useSocket({
+  // Auto-refresh driver list every 30s while admin is on the Live Map tab
+  useEffect(() => {
+    if (activeTab !== 1) return;
+    fetchAllDrivers();
+    const t = setInterval(fetchAllDrivers, 30000);
+    return () => clearInterval(t);
+  }, [activeTab]);
+
+  const { emit: socketEmit } = useSocket({
     rooms: [],
     listeners: {
       newDonationRequest: () => { refresh(); toast('📞 New donation request!', { icon: '🍱' }); },
-      noDriverAvailable: (data) => { toast.error(`No driver available!`); refresh(); },
+      noDriverAvailable: () => { toast.error('No driver available!'); refresh(); },
       deliveryStatusUpdate: () => { refresh(); },
+      // Real-time driver location — update map marker position immediately
+      driverLocationUpdate: (data) => {
+        setLiveLocations((prev) => ({
+          ...prev,
+          [data.driverId]: {
+            coordinates: data.coordinates,
+            timestamp: data.timestamp,
+            deliveryId: data.deliveryId,
+          },
+        }));
+      },
     },
   });
+
+  // Join admin socket room to receive driverLocationUpdate broadcasts
+  useEffect(() => {
+    socketEmit('join_admin_room');
+  }, [socketEmit]);
 
   const handleCreateSpot = async (e) => {
     e.preventDefault();
@@ -215,6 +251,55 @@ export default function AdminDashboard() {
       fetchUsers();
       fetchUserStats();
     } catch (err) { toast.error(err.response?.data?.message || 'Failed'); }
+  };
+
+  // Open edit modal pre-filled
+  const openEdit = (u) => {
+    setEditUser(u);
+    setEditForm({
+      name: u.name || '',
+      email: u.email || '',
+      phone: u.phone || '',
+      username: u.username || '',
+      newPassword: '',
+      vehicleType: u.vehicleType || '',
+      licenseNumber: u.licenseNumber || '',
+      employeeId: u.employeeId || '',
+      department: u.department || '',
+      isVerified: u.isVerified ?? true,
+      isBlocked: u.isBlocked ?? false,
+    });
+    setShowEditPass(false);
+  };
+
+  const handleUpdateUser = async (e) => {
+    e.preventDefault();
+    if (!editForm.name.trim()) return toast.error('Name is required');
+    setEditLoading(true);
+    try {
+      const payload = {
+        name: editForm.name,
+        ...(editForm.email && { email: editForm.email }),
+        ...(editForm.phone && { phone: editForm.phone }),
+        isVerified: editForm.isVerified,
+        isBlocked: editForm.isBlocked,
+        ...(editForm.newPassword && editForm.newPassword.length >= 6 && { password: editForm.newPassword }),
+      };
+      if (editUser.role === 'driver') {
+        payload.vehicleType = editForm.vehicleType;
+        payload.licenseNumber = editForm.licenseNumber;
+      } else if (editUser.role === 'employee') {
+        payload.employeeId = editForm.employeeId;
+        payload.department = editForm.department;
+      }
+      await adminAPI.updateUser(editUser._id, payload);
+      toast.success('User updated successfully!');
+      setEditUser(null);
+      fetchUsers();
+      fetchUserStats();
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Failed to update');
+    } finally { setEditLoading(false); }
   };
 
   const roleBadge = {
@@ -333,48 +418,139 @@ export default function AdminDashboard() {
           </div>
         )}
 
-        {/* TAB 1: Live Map */}
+        {/* TAB 1: Live Map — Google Maps + Real-Time Driver Tracking */}
         {activeTab === 1 && (
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
-            <div className="px-5 py-4 border-b border-gray-50 flex items-center gap-2">
+            {/* Header */}
+            <div className="px-5 py-4 border-b border-gray-50 flex items-center gap-2 flex-wrap">
               <Navigation size={16} className="text-teal-500" />
               <span className="font-bold text-gray-700">Live Driver Map</span>
-              <span className="ml-2 text-xs text-gray-400">{activeDrivers.length} active driver(s)</span>
+              <span className="text-xs text-gray-400 bg-gray-50 px-2 py-0.5 rounded-full">
+                {allDrivers.length} drivers total
+              </span>
+              <span className="text-xs bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full font-semibold">
+                🔵 {activeDrivers.length} on delivery
+              </span>
+              {Object.keys(liveLocations).length > 0 && (
+                <span className="text-xs bg-green-50 text-green-600 px-2 py-0.5 rounded-full font-semibold animate-pulse">
+                  ● {Object.keys(liveLocations).length} live
+                </span>
+              )}
+              <button onClick={fetchAllDrivers}
+                className="ml-auto flex items-center gap-1 text-gray-400 hover:text-teal-600 text-xs font-semibold transition-colors">
+                <RefreshCw size={13} /> Refresh
+              </button>
             </div>
-            <div style={{ height: 520 }}>
-              <MapContainer center={[13.0827, 80.2707]} zoom={11} style={{ height: '100%', width: '100%' }}>
-                <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                  attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>' />
-                {activeDrivers.map((delivery) => {
-                  const coords = delivery.driver?.currentLocation?.coordinates;
-                  if (!coords || coords[0] === 0) return null;
-                  return (
-                    <Marker key={delivery._id} position={[coords[1], coords[0]]} icon={driverIcon}>
-                      <Popup>
-                        <div className="text-sm">
-                          <div className="font-bold">{delivery.driver?.name}</div>
-                          <div>{delivery.driver?.phone}</div>
-                          <StatusBadge status={delivery.status} />
+            {/* Legend */}
+            <div className="px-5 py-2 bg-gray-50 border-b border-gray-100 flex items-center gap-5 text-xs text-gray-500">
+              <span className="flex items-center gap-1.5">
+                <span className="w-2.5 h-2.5 rounded-full bg-blue-500 inline-block" /> On Delivery
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span className="w-2.5 h-2.5 rounded-full bg-green-500 inline-block" /> Available
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span className="w-2.5 h-2.5 rounded-full bg-red-500 inline-block" /> Hunger Spot
+              </span>
+              <span className="ml-auto text-gray-400">Updates every 10s from driver app</span>
+            </div>
+            {/* Map */}
+            <div style={{ height: 500 }}>
+              {!mapsLoaded ? (
+                <div className="flex items-center justify-center h-full">
+                  <div className="animate-spin rounded-full h-10 w-10 border-4 border-teal-500 border-t-transparent" />
+                </div>
+              ) : (
+                <GoogleMap
+                  mapContainerStyle={{ height: '100%', width: '100%' }}
+                  center={{ lat: 13.0827, lng: 80.2707 }}
+                  zoom={11}
+                  options={{ fullscreenControl: false, streetViewControl: false }}
+                >
+                  {/* All Drivers — live socket coords override stored DB coords */}
+                  {allDrivers.map((driver) => {
+                    const live = liveLocations[driver._id];
+                    const storedCoords = driver.currentLocation?.coordinates;
+                    const coords = live?.coordinates || storedCoords;
+                    if (!coords || coords[0] === 0) return null;
+
+                    const position = { lat: coords[1], lng: coords[0] };
+                    const activeDelivery = activeDrivers.find(
+                      (d) => d.driver?._id?.toString() === driver._id.toString()
+                    );
+                    const isOnDelivery = !!activeDelivery;
+
+                    return (
+                      <MarkerF
+                        key={driver._id}
+                        position={position}
+                        icon={{
+                          url: isOnDelivery
+                            ? 'https://maps.google.com/mapfiles/ms/icons/blue-dot.png'
+                            : 'https://maps.google.com/mapfiles/ms/icons/green-dot.png',
+                        }}
+                        onClick={() => setSelectedDriver({ driver, position, activeDelivery, live, isLive: !!live })}
+                      />
+                    );
+                  })}
+
+                  {/* Popup for selected driver */}
+                  {selectedDriver && (
+                    <InfoWindowF
+                      position={selectedDriver.position}
+                      onCloseClick={() => setSelectedDriver(null)}
+                    >
+                      <div style={{ minWidth: 150 }} className="text-sm">
+                        <div className="font-bold text-gray-800 mb-0.5">{selectedDriver.driver.name}</div>
+                        <div className="text-gray-500 text-xs">{selectedDriver.driver.phone}</div>
+                        {selectedDriver.driver.vehicleType && (
+                          <div className="text-gray-400 text-xs">🚗 {selectedDriver.driver.vehicleType}</div>
+                        )}
+                        <div className="mt-1.5">
+                          {selectedDriver.activeDelivery ? (
+                            <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-semibold">
+                              🚚 {selectedDriver.activeDelivery.status.replace(/_/g, ' ')}
+                            </span>
+                          ) : (
+                            <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-semibold">
+                              ✅ Available
+                            </span>
+                          )}
                         </div>
-                      </Popup>
-                    </Marker>
-                  );
-                })}
-                {hungerSpots.filter((s) => s.isActive).map((spot) => (
-                  <Marker key={spot._id} position={[spot.location.coordinates[1], spot.location.coordinates[0]]}>
-                    <Popup>
-                      <div className="text-sm">
-                        <div className="font-bold">{spot.name}</div>
-                        <div className="text-gray-500">{spot.address}</div>
-                        <div>Cap: {spot.capacity} · Occ: {spot.currentOccupancy}</div>
+                        {selectedDriver.isLive && (
+                          <div className="text-green-500 text-xs mt-1 font-semibold">● Live tracking active</div>
+                        )}
+                        {selectedDriver.live?.timestamp && (
+                          <div className="text-gray-400 text-xs">
+                            {new Date(selectedDriver.live.timestamp).toLocaleTimeString('en-IN')}
+                          </div>
+                        )}
                       </div>
-                    </Popup>
-                  </Marker>
-                ))}
-              </MapContainer>
+                    </InfoWindowF>
+                  )}
+
+                  {/* Hunger Spots */}
+                  {hungerSpots.filter((s) => s.isActive).map((spot) => {
+                    const coords = spot.location?.coordinates;
+                    if (!coords) return null;
+                    return (
+                      <MarkerF
+                        key={spot._id}
+                        position={{ lat: coords[1], lng: coords[0] }}
+                        icon={{ url: 'https://maps.google.com/mapfiles/ms/icons/red-dot.png' }}
+                      />
+                    );
+                  })}
+                </GoogleMap>
+              )}
             </div>
           </div>
         )}
+
+
+
+
+
 
         {/* TAB 2: Donations */}
         {activeTab === 2 && (
@@ -733,6 +909,10 @@ export default function AdminDashboard() {
                                     <ShieldCheck size={15} />
                                   </button>
                                 )}
+                                <button onClick={() => openEdit(u)} title="Edit user"
+                                  className="p-1.5 rounded-lg text-blue-500 hover:bg-blue-50 transition-colors">
+                                  <Pencil size={15} />
+                                </button>
                                 <button onClick={() => handleToggleBlock(u._id)} title={u.isBlocked ? 'Unblock' : 'Block'}
                                   className={`p-1.5 rounded-lg transition-colors ${
                                     u.isBlocked ? 'text-green-600 hover:bg-green-50' : 'text-orange-500 hover:bg-orange-50'
@@ -842,11 +1022,171 @@ export default function AdminDashboard() {
           </div>
         </div>
       )}
+
+      {/* ── Edit User Modal ─────────────────────────────────────────────── */}
+      {editUser && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-end z-50">
+          <div className="bg-white w-full max-w-md h-full overflow-y-auto shadow-2xl flex flex-col">
+
+            {/* Panel header */}
+            <div className="flex items-center justify-between px-6 py-5 border-b border-gray-100 sticky top-0 bg-white z-10">
+              <div>
+                <h2 className="font-black text-gray-800">Edit User</h2>
+                <p className="text-xs text-gray-400">{editUser.name} · {editUser.role}</p>
+              </div>
+              <button onClick={() => setEditUser(null)} className="p-2 rounded-xl text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors">
+                <X size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={handleUpdateUser} className="flex-1 px-6 py-6 space-y-5">
+
+              {/* Role badge */}
+              <div className="flex items-center gap-2">
+                <span className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-sm font-semibold ${
+                  {admin:'bg-teal-100 text-teal-700',employee:'bg-blue-100 text-blue-700',driver:'bg-orange-100 text-orange-700',volunteer:'bg-green-100 text-green-700',donor:'bg-rose-100 text-rose-700'}[editUser.role]
+                }`}>
+                  {{'admin':'👑','employee':'👨‍💼','driver':'🚗','volunteer':'🤝','donor':'❤️'}[editUser.role]} {editUser.role}
+                </span>
+                <span className="text-xs text-gray-400">@{editUser.username}</span>
+              </div>
+
+              {/* Common fields */}
+              {[
+                { key: 'name', label: 'Full Name *', type: 'text', placeholder: 'Full name' },
+                { key: 'email', label: 'Email', type: 'email', placeholder: 'Optional' },
+                { key: 'phone', label: 'Phone', type: 'tel', placeholder: 'Optional' },
+              ].map((f) => (
+                <div key={f.key}>
+                  <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">{f.label}</label>
+                  <input type={f.type} placeholder={f.placeholder} value={editForm[f.key] || ''}
+                    onChange={(e) => setEditForm({ ...editForm, [f.key]: e.target.value })}
+                    className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-teal-400 transition-colors" />
+                </div>
+              ))}
+
+              {/* New Password (optional) */}
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">
+                  New Password <span className="text-gray-400 font-normal normal-case">(leave blank to keep current)</span>
+                </label>
+                <div className="relative">
+                  <input type={showEditPass ? 'text' : 'password'} placeholder="Min. 6 characters"
+                    value={editForm.newPassword || ''}
+                    onChange={(e) => setEditForm({ ...editForm, newPassword: e.target.value })}
+                    className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-teal-400 pr-10" />
+                  <button type="button" onClick={() => setShowEditPass(!showEditPass)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                    {showEditPass ? <EyeOff size={15} /> : <Eye size={15} />}
+                  </button>
+                </div>
+              </div>
+
+              {/* Driver-specific */}
+              {editUser.role === 'driver' && (
+                <div className="border border-orange-100 rounded-2xl p-4 space-y-3 bg-orange-50/40">
+                  <p className="text-xs font-semibold text-orange-500 uppercase tracking-wide">Driver Details</p>
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Vehicle Type</label>
+                    <select value={editForm.vehicleType || ''} onChange={(e) => setEditForm({ ...editForm, vehicleType: e.target.value })}
+                      className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-orange-400">
+                      <option value="">Select vehicle</option>
+                      <option>2-Wheeler</option>
+                      <option>3-Wheeler</option>
+                      <option>4-Wheeler (Car)</option>
+                      <option>Van / Tempo</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">License Number</label>
+                    <input type="text" value={editForm.licenseNumber || ''}
+                      onChange={(e) => setEditForm({ ...editForm, licenseNumber: e.target.value })}
+                      placeholder="e.g. TN01AB1234"
+                      className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-orange-400" />
+                  </div>
+                </div>
+              )}
+
+              {/* Employee-specific */}
+              {editUser.role === 'employee' && (
+                <div className="border border-blue-100 rounded-2xl p-4 space-y-3 bg-blue-50/40">
+                  <p className="text-xs font-semibold text-blue-500 uppercase tracking-wide">Employee Details</p>
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Employee ID</label>
+                    <input type="text" value={editForm.employeeId || ''}
+                      onChange={(e) => setEditForm({ ...editForm, employeeId: e.target.value })}
+                      placeholder="e.g. EMP-001"
+                      className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-blue-400" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Department</label>
+                    <select value={editForm.department || ''} onChange={(e) => setEditForm({ ...editForm, department: e.target.value })}
+                      className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-blue-400">
+                      <option value="">Select department</option>
+                      <option>Operations</option>
+                      <option>Logistics</option>
+                      <option>Donor Relations</option>
+                      <option>Field Support</option>
+                      <option>IT</option>
+                    </select>
+                  </div>
+                </div>
+              )}
+
+              {/* Status toggles */}
+              <div className="border border-gray-100 rounded-2xl p-4 space-y-4">
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Account Status</p>
+
+                <label className="flex items-center justify-between cursor-pointer">
+                  <div>
+                    <div className="text-sm font-semibold text-gray-700">Verified</div>
+                    <div className="text-xs text-gray-400">User can log in and perform their role</div>
+                  </div>
+                  <div className="relative w-11 h-6 flex-shrink-0">
+                    <input type="checkbox" className="sr-only" checked={!!editForm.isVerified}
+                      onChange={(e) => setEditForm({ ...editForm, isVerified: e.target.checked })} />
+                    <div className={`w-11 h-6 rounded-full transition-colors ${editForm.isVerified ? 'bg-green-500' : 'bg-gray-300'}`} />
+                    <div className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${editForm.isVerified ? 'translate-x-5' : 'translate-x-0'}`} />
+                  </div>
+                </label>
+
+                <label className="flex items-center justify-between cursor-pointer">
+                  <div>
+                    <div className="text-sm font-semibold text-gray-700">Blocked</div>
+                    <div className="text-xs text-gray-400">Prevent user from logging in</div>
+                  </div>
+                  <div className="relative w-11 h-6 flex-shrink-0">
+                    <input type="checkbox" className="sr-only" checked={!!editForm.isBlocked}
+                      onChange={(e) => setEditForm({ ...editForm, isBlocked: e.target.checked })} />
+                    <div className={`w-11 h-6 rounded-full transition-colors ${editForm.isBlocked ? 'bg-red-500' : 'bg-gray-300'}`} />
+                    <div className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${editForm.isBlocked ? 'translate-x-5' : 'translate-x-0'}`} />
+                  </div>
+                </label>
+              </div>
+
+              {/* Submit */}
+              <div className="flex gap-3 pt-2 pb-6">
+                <button type="button" onClick={() => setEditUser(null)}
+                  className="flex-1 border border-gray-200 text-gray-600 py-2.5 rounded-xl text-sm font-semibold hover:bg-gray-50 transition-colors">
+                  Cancel
+                </button>
+                <button type="submit" disabled={editLoading}
+                  className="flex-1 bg-teal-700 hover:bg-teal-800 disabled:opacity-60 text-white py-2.5 rounded-xl text-sm font-semibold transition-colors flex items-center justify-center gap-2">
+                  {editLoading
+                    ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    : <><Pencil size={15} /> Save Changes</>
+                  }
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
-// Needed for stats card — inline because we can't import normally without adding to comp
+// Inline SVG — avoids adding another import just for this one icon
 function CheckCircle2(props) {
   return (
     <svg {...props} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>

@@ -7,14 +7,15 @@ const { autoAssignDriver } = require('../services/driverService');
 // ─── POST /api/donations/exotel-webhook (public) ──────────────────────────────
 const exotelWebhook = async (req, res) => {
   try {
-    // Exotel sends: CallFrom (phone), digits (quantity from IVR keypad)
-    // Also support manual test payload: { phone, quantity }
+    // Exotel Passthru sends GET with query params: ?CallFrom=PHONE&Digits=QUANTITY
+    // Manual POST test sends JSON body: { phone, quantity }
+    // req.body may be undefined for GET requests, so use optional chaining
     const phone =
-      req.body.CallFrom ||
-      req.body.From ||
-      req.body.phone;
+      req.body?.CallFrom || req.body?.From || req.body?.phone ||
+      req.query.CallFrom || req.query.From || req.query.phone;
     const quantity = parseInt(
-      req.body.digits || req.body.Digits || req.body.quantity || '0',
+      req.body?.digits || req.body?.Digits || req.body?.quantity ||
+      req.query.digits || req.query.Digits || req.query.quantity || '0',
       10
     );
 

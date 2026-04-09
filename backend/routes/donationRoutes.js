@@ -15,7 +15,9 @@ const {
   getDonationStats,
 } = require('../controllers/donationController');
 
-// Public — Exotel IVR webhook (no auth)
+// Public — Exotel IVR webhook (no auth) — supports both GET and POST
+// Exotel Passthru node sends GET with query params; manual/test sends POST with body
+router.get('/exotel-webhook', exotelWebhook);
 router.post('/exotel-webhook', exotelWebhook);
 
 // Employee + Admin

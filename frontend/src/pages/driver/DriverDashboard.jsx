@@ -4,9 +4,9 @@ import { useAuth } from '../../context/AuthContext';
 import { useSocket } from '../../hooks/useSocket';
 import StatusBadge from '../../components/StatusBadge';
 import toast from 'react-hot-toast';
-import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from 'react-leaflet';
-import L from 'leaflet';
-import 'leaflet/dist/leaflet.css';
+import { GoogleMap, MarkerF, DirectionsRenderer } from '@react-google-maps/api';
+import { useGoogleMaps } from '../../context/GoogleMapsContext';
+
 import {
   getMyDeliveries,
   acceptDelivery,
@@ -22,39 +22,8 @@ import {
   Camera, Package, RefreshCw, AlertTriangle
 } from 'lucide-react';
 
-// Fix leaflet default icon issue
-delete L.Icon.Default.prototype._getIconUrl;
-L.Icon.Default.mergeOptions({
-  iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
-  iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
-  shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
-});
 
-const driverIcon = new L.Icon({
-  iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-blue.png',
-  shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
-  iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34],
-});
 
-const pickupIcon = new L.Icon({
-  iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-orange.png',
-  shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
-  iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34],
-});
-
-const destIcon = new L.Icon({
-  iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-green.png',
-  shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
-  iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34],
-});
-
-function RecenterMap({ position }) {
-  const map = useMap();
-  useEffect(() => {
-    if (position) map.setView(position, map.getZoom());
-  }, [position, map]);
-  return null;
-}
 
 export default function DriverDashboard() {
   const { user, logout } = useAuth();
@@ -71,6 +40,12 @@ export default function DriverDashboard() {
   const [showCompleteModal, setShowCompleteModal] = useState(false);
   const [showRejectModal, setShowRejectModal] = useState(false);
   const [rejectReason, setRejectReason] = useState('');
+
+  // ── Google Maps — loaded once at app root via GoogleMapsProvider ─────
+  const { isLoaded } = useGoogleMaps();
+  const [directions, setDirections] = useState(null);
+  const [mapRef, setMapRef] = useState(null);
+
 
   const refresh = useCallback(async () => {
     try {
@@ -104,6 +79,45 @@ export default function DriverDashboard() {
     locationIntervalRef.current = setInterval(shareLocation, 10000); // every 10s
     return () => clearInterval(locationIntervalRef.current);
   }, [activeDelivery?.status]);
+
+  // Fetch turn-by-turn route from Google Maps Directions API.
+  // Route switches automatically based on delivery status:
+  //   accepted          → driver’s live position → pickup address
+  //   picked_up/in_transit → pickup → hunger spot (final destination)
+  useEffect(() => {
+    if (!isLoaded || !activeDelivery) { setDirections(null); return; }
+    const status = activeDelivery.status;
+    const pickupCoords = getPickupCoords();
+    const destCoords   = getDestCoords();
+    let origin = null, destination = null;
+
+    if (status === 'accepted' && driverPos) {
+      origin      = { lat: driverPos[0], lng: driverPos[1] };
+      if (pickupCoords) destination = { lat: pickupCoords[0], lng: pickupCoords[1] };
+    } else if (['picked_up', 'in_transit'].includes(status)) {
+      if (pickupCoords) origin      = { lat: pickupCoords[0], lng: pickupCoords[1] };
+      if (destCoords)   destination = { lat: destCoords[0],   lng: destCoords[1]   };
+    }
+    if (!origin || !destination || !window.google) return;
+
+    new window.google.maps.DirectionsService().route(
+      { origin, destination, travelMode: window.google.maps.TravelMode.DRIVING },
+      (result, status) => {
+        if (status === 'OK') {
+          setDirections(result);
+          // Zoom map to show the full route
+          if (mapRef) {
+            const bounds = new window.google.maps.LatLngBounds();
+            result.routes[0].overview_path.forEach((p) => bounds.extend(p));
+            mapRef.fitBounds(bounds, { padding: 50 });
+          }
+        } else {
+          setDirections(null);
+        }
+      }
+    );
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLoaded, driverPos?.[0], driverPos?.[1], activeDelivery?._id, activeDelivery?.status]);
 
   // Socket — new assignment notification
   useSocket({
@@ -208,7 +222,6 @@ export default function DriverDashboard() {
 
   const formatTime = (t) => t ? new Date(t).toLocaleString('en-IN') : '—';
 
-  const mapCenter = driverPos || getPickupCoords() || [13.0827, 80.2707];
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -343,41 +356,71 @@ export default function DriverDashboard() {
                   </div>
                 </div>
 
-                {/* Live Map */}
+                {/* Live Map — Google Maps with automatic turn-by-turn routing */}
                 <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden" style={{ height: 420 }}>
                   <div className="px-4 py-3 border-b border-gray-50 flex items-center gap-2">
                     <Navigation size={16} className="text-orange-500" />
                     <span className="font-semibold text-gray-700 text-sm">Live Map</span>
+                    {directions && (
+                      <span className="ml-2 text-xs text-blue-500 font-semibold">
+                        {activeDelivery.status === 'accepted' ? '🧭 Route to Pickup' : '🚚 Route to Delivery'}
+                      </span>
+                    )}
                     {driverPos && <span className="ml-auto text-xs text-green-500 font-semibold">● Sharing Location</span>}
                   </div>
-                  <MapContainer center={mapCenter} zoom={13} style={{ height: '100%', width: '100%' }}>
-                    <TileLayer
-                      url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                      attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-                    />
-                    {driverPos && (
-                      <Marker position={driverPos} icon={driverIcon}>
-                        <Popup>You (Driver)</Popup>
-                      </Marker>
-                    )}
-                    {getPickupCoords() && (
-                      <Marker position={getPickupCoords()} icon={pickupIcon}>
-                        <Popup>Pickup: {activeDelivery.donation?.pickupAddress}</Popup>
-                      </Marker>
-                    )}
-                    {getDestCoords() && (
-                      <Marker position={getDestCoords()} icon={destIcon}>
-                        <Popup>Destination: {activeDelivery.hungerSpot?.name}</Popup>
-                      </Marker>
-                    )}
-                    {driverPos && getPickupCoords() && (
-                      <Polyline positions={[driverPos, getPickupCoords()]} color="orange" dashArray="8" />
-                    )}
-                    {getPickupCoords() && getDestCoords() && (
-                      <Polyline positions={[getPickupCoords(), getDestCoords()]} color="green" />
-                    )}
-                    <RecenterMap position={driverPos} />
-                  </MapContainer>
+                  {!isLoaded ? (
+                    <div className="flex items-center justify-center" style={{ height: 'calc(100% - 49px)' }}>
+                      <div className="animate-spin rounded-full h-8 w-8 border-4 border-orange-500 border-t-transparent" />
+                    </div>
+                  ) : (
+                    <GoogleMap
+                      mapContainerStyle={{ height: 'calc(100% - 49px)', width: '100%' }}
+                      center={
+                        driverPos
+                          ? { lat: driverPos[0], lng: driverPos[1] }
+                          : getPickupCoords()
+                            ? { lat: getPickupCoords()[0], lng: getPickupCoords()[1] }
+                            : { lat: 13.0827, lng: 80.2707 }
+                      }
+                      zoom={13}
+                      onLoad={(map) => setMapRef(map)}
+                      options={{ fullscreenControl: false, streetViewControl: false, mapTypeControl: false }}
+                    >
+                      {/* Road-following route from Google Directions API */}
+                      {directions && (
+                        <DirectionsRenderer
+                          directions={directions}
+                          options={{
+                            suppressMarkers: false,
+                            polylineOptions: {
+                              strokeColor: activeDelivery.status === 'accepted' ? '#f97316' : '#16a34a',
+                              strokeWeight: 5,
+                              strokeOpacity: 0.85,
+                            },
+                          }}
+                        />
+                      )}
+                      {/* Fallback markers before a route is fetched */}
+                      {!directions && driverPos && (
+                        <MarkerF
+                          position={{ lat: driverPos[0], lng: driverPos[1] }}
+                          icon={{ url: 'https://maps.google.com/mapfiles/ms/icons/blue-dot.png' }}
+                        />
+                      )}
+                      {!directions && getPickupCoords() && (
+                        <MarkerF
+                          position={{ lat: getPickupCoords()[0], lng: getPickupCoords()[1] }}
+                          icon={{ url: 'https://maps.google.com/mapfiles/ms/icons/orange-dot.png' }}
+                        />
+                      )}
+                      {!directions && getDestCoords() && (
+                        <MarkerF
+                          position={{ lat: getDestCoords()[0], lng: getDestCoords()[1] }}
+                          icon={{ url: 'https://maps.google.com/mapfiles/ms/icons/green-dot.png' }}
+                        />
+                      )}
+                    </GoogleMap>
+                  )}
                 </div>
               </div>
             )}

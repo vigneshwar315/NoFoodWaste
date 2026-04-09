@@ -1,6 +1,7 @@
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import { AuthProvider, useAuth } from './context/AuthContext';
+import { GoogleMapsProvider } from './context/GoogleMapsContext';
 
 // Auth Pages
 import LandingPage from './pages/LandingPage';
@@ -73,17 +74,19 @@ function AppRoutes() {
 function App() {
   return (
     <AuthProvider>
-      <Router>
-        <Toaster
-          position="top-right"
-          toastOptions={{
-            duration: 4000,
-            style: { fontFamily: 'Inter, sans-serif' },
-            success: { iconTheme: { primary: '#f97316', secondary: '#fff' } },
-          }}
-        />
-        <AppRoutes />
-      </Router>
+      <GoogleMapsProvider>
+        <Router>
+          <Toaster
+            position="top-right"
+            toastOptions={{
+              duration: 4000,
+              style: { fontFamily: 'Inter, sans-serif' },
+              success: { iconTheme: { primary: '#f97316', secondary: '#fff' } },
+            }}
+          />
+          <AppRoutes />
+        </Router>
+      </GoogleMapsProvider>
     </AuthProvider>
   );
 }

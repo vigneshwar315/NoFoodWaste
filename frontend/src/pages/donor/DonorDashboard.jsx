@@ -4,34 +4,15 @@ import { useAuth } from '../../context/AuthContext';
 import { useSocket } from '../../hooks/useSocket';
 import StatusBadge from '../../components/StatusBadge';
 import { getMyDonations, getDonationById } from '../../services/donationService';
-import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
-import L from 'leaflet';
-import 'leaflet/dist/leaflet.css';
+import { GoogleMap, MarkerF } from '@react-google-maps/api';
+import { useGoogleMaps } from '../../context/GoogleMapsContext';
 import toast from 'react-hot-toast';
 import { Gift, Phone, LogOut, RefreshCw, MapPin, Clock, Truck, Eye } from 'lucide-react';
-
-delete L.Icon.Default.prototype._getIconUrl;
-L.Icon.Default.mergeOptions({
-  iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
-  iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
-  shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
-});
-
-const driverIcon = new L.Icon({
-  iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-blue.png',
-  shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
-  iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34],
-});
-
-function RecenterMap({ position }) {
-  const map = useMap();
-  useEffect(() => { if (position) map.setView(position, map.getZoom()); }, [position, map]);
-  return null;
-}
 
 export default function DonorDashboard() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  const { isLoaded: mapsLoaded } = useGoogleMaps();
   const [donations, setDonations] = useState([]);
   const [activeDonation, setActiveDonation] = useState(null);
   const [activeDetail, setActiveDetail] = useState(null);
@@ -237,24 +218,42 @@ export default function DonorDashboard() {
               <button onClick={() => setShowTrackModal(false)} className="text-gray-400 hover:text-gray-600 text-xl font-bold">×</button>
             </div>
             <div style={{ height: 320 }}>
-              <MapContainer
-                center={driverLocation || [13.0827, 80.2707]}
-                zoom={14}
-                style={{ height: '100%', width: '100%' }}
-              >
-                <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-                {driverLocation && (
-                  <Marker position={driverLocation} icon={driverIcon}>
-                    <Popup>Driver: {activeDetail.assignedDriver?.name}</Popup>
-                  </Marker>
-                )}
-                {activeDetail?.pickupLocation?.coordinates[0] !== 0 && (
-                  <Marker position={[activeDetail.pickupLocation.coordinates[1], activeDetail.pickupLocation.coordinates[0]]}>
-                    <Popup>Pickup Location</Popup>
-                  </Marker>
-                )}
-                {driverLocation && <RecenterMap position={driverLocation} />}
-              </MapContainer>
+              {!mapsLoaded ? (
+                <div className="flex items-center justify-center h-full bg-gray-50">
+                  <div className="animate-spin rounded-full h-8 w-8 border-4 border-rose-500 border-t-transparent" />
+                </div>
+              ) : (
+                <GoogleMap
+                  mapContainerStyle={{ height: '100%', width: '100%' }}
+                  center={
+                    driverLocation
+                      ? { lat: driverLocation[0], lng: driverLocation[1] }
+                      : { lat: 13.0827, lng: 80.2707 }
+                  }
+                  zoom={14}
+                  options={{ fullscreenControl: false, streetViewControl: false, mapTypeControl: false }}
+                >
+                  {/* Driver marker (blue) */}
+                  {driverLocation && (
+                    <MarkerF
+                      position={{ lat: driverLocation[0], lng: driverLocation[1] }}
+                      icon={{ url: 'https://maps.google.com/mapfiles/ms/icons/blue-dot.png' }}
+                      title={`Driver: ${activeDetail.assignedDriver?.name}`}
+                    />
+                  )}
+                  {/* Pickup location marker (orange) */}
+                  {activeDetail?.pickupLocation?.coordinates?.[0] !== 0 && (
+                    <MarkerF
+                      position={{
+                        lat: activeDetail.pickupLocation.coordinates[1],
+                        lng: activeDetail.pickupLocation.coordinates[0],
+                      }}
+                      icon={{ url: 'https://maps.google.com/mapfiles/ms/icons/orange-dot.png' }}
+                      title="Pickup Location"
+                    />
+                  )}
+                </GoogleMap>
+              )}
             </div>
             <div className="px-5 py-4 text-sm text-gray-600 border-t border-gray-50">
               <div className="font-semibold">{activeDetail.assignedDriver?.name}</div>
