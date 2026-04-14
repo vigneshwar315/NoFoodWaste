@@ -175,40 +175,15 @@ const reassignDriver = async (deliveryId, reason) => {
 };
 
 /**
- * Update driver's current location and broadcast via Socket.io
+ * Update driver's current location by publishing an event to Kafka (bypassing DB locks)
  */
 const updateDriverLocation = async (driverId, coordinates) => {
-  await User.findByIdAndUpdate(driverId, {
-    currentLocation: { type: 'Point', coordinates },
-  });
-
-  // Find active delivery for this driver
-  const delivery = await Delivery.findOne({
-    driver: driverId,
-    status: { $in: ['accepted', 'picked_up', 'in_transit'] },
-  });
-
-  if (global.io && delivery) {
-    global.io.to(`delivery_${delivery._id}`).emit('locationUpdate', {
-      driverId,
-      coordinates,
-      deliveryId: delivery._id,
-      donationId: delivery.donation,
-      timestamp: new Date(),
-    });
-  }
-
-  // Broadcast to admin room for real-time live map
-  if (global.io) {
-    global.io.to('admins').emit('driverLocationUpdate', {
-      driverId,
-      coordinates,
-      deliveryId: delivery?._id || null,
-      timestamp: new Date(),
-    });
-  }
-
-  return { updated: true, delivery: delivery?._id };
+  const { produceLocationEvent } = require('./kafkaService');
+  
+  // Fire and forget to Kafka topic
+  await produceLocationEvent(driverId, coordinates, null); // We will resolve delivery in the consumer
+  
+  return { updated: true, asyncMode: 'kafka' };
 };
 
 module.exports = {

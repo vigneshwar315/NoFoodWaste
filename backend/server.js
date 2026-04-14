@@ -9,6 +9,8 @@ const { Server } = require('socket.io');
 const connectDB = require('./config/db');
 const { seedAdmin } = require('./controllers/authController');
 const { startCronJobs } = require('./services/cronService');
+const { connectKafkaProducer } = require('./services/kafkaService');
+const { startLocationConsumer } = require('./workers/locationConsumer');
 
 // Routes
 const authRoutes = require('./routes/authRoutes');
@@ -136,6 +138,10 @@ const start = async () => {
   await connectDB();
   await seedAdmin();
   startCronJobs();
+
+  // Initialize Kafka
+  await connectKafkaProducer();
+  await startLocationConsumer();
 
   server.listen(PORT, () => {
     console.log(`🚀 Server running on http://localhost:${PORT}`);

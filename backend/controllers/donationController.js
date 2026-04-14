@@ -25,19 +25,15 @@ const exotelWebhook = async (req, res) => {
 
     const result = await createFromWebhook({ phone, quantity });
 
+    // IMPORTANT: Exotel strictly requires an HTTP 200 OK status code. 
+    // If we return 201 Created or 400, Exotel thinks the webhook failed and DROPS the call forwarding.
     if (!result.success) {
-      return res.status(200).json({
-        success: false,
-        reason: result.reason,
-        message: result.message,
-      });
+      console.warn('Webhook warning:', result.message);
+      // We still return 200 OK to Exotel so the call continues cleanly!
+      return res.status(200).type('text/plain').send('OK');
     }
 
-    return res.status(201).json({
-      success: true,
-      message: 'Donation request created and pending employee verification',
-      donationId: result.donation._id,
-    });
+    return res.status(200).type('text/plain').send('OK');
   } catch (err) {
     console.error('Webhook error:', err);
     res.status(500).json({ success: false, message: err.message });

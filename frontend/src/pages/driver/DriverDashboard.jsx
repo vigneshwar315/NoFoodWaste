@@ -19,7 +19,7 @@ import {
 } from '../../services/deliveryService';
 import {
   Truck, CheckCircle, XCircle, LogOut, Navigation, MapPin,
-  Camera, Package, RefreshCw, AlertTriangle
+  Camera, Package, RefreshCw, AlertTriangle, Power
 } from 'lucide-react';
 
 
@@ -41,6 +41,19 @@ export default function DriverDashboard() {
   const [showRejectModal, setShowRejectModal] = useState(false);
   const [rejectReason, setRejectReason] = useState('');
 
+  // ── Fleet Tracking (Always Online) ─────────────────────────────────────────
+  const [isTrackingEnabled, setIsTrackingEnabled] = useState(() => {
+    return localStorage.getItem('driver_tracking') === 'true';
+  });
+
+  const toggleTracking = () => {
+    const newState = !isTrackingEnabled;
+    setIsTrackingEnabled(newState);
+    localStorage.setItem('driver_tracking', newState.toString());
+    if (newState) toast.success('📡 You are now online and tracking is active!');
+    else toast('📴 You are now offline. Tracking stopped.', { icon: '🛑' });
+  };
+
   // ── Google Maps — loaded once at app root via GoogleMapsProvider ─────
   const { isLoaded } = useGoogleMaps();
   const [directions, setDirections] = useState(null);
@@ -59,9 +72,12 @@ export default function DriverDashboard() {
 
   useEffect(() => { refresh(); }, []);
 
-  // Real-time location sharing when delivery is active
+  // Real-time location sharing when delivery is active OR user manually enabled Fleet Tracking
   useEffect(() => {
-    if (!activeDelivery || !['accepted', 'picked_up', 'in_transit'].includes(activeDelivery.status)) {
+    const hasActiveDelivery = activeDelivery && ['accepted', 'picked_up', 'in_transit'].includes(activeDelivery.status);
+    
+    // Stop tracking entirely if not explicitly online AND no active delivery exists
+    if (!hasActiveDelivery && !isTrackingEnabled) {
       if (locationIntervalRef.current) clearInterval(locationIntervalRef.current);
       return;
     }
@@ -78,7 +94,7 @@ export default function DriverDashboard() {
     shareLocation();
     locationIntervalRef.current = setInterval(shareLocation, 10000); // every 10s
     return () => clearInterval(locationIntervalRef.current);
-  }, [activeDelivery?.status]);
+  }, [activeDelivery?.status, isTrackingEnabled]);
 
   // Fetch turn-by-turn route from Google Maps Directions API.
   // Route switches automatically based on delivery status:
@@ -237,7 +253,20 @@ export default function DriverDashboard() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <button onClick={refresh} className="bg-white/20 hover:bg-white/30 p-2 rounded-lg transition-colors">
+          {/* Tracker Toggle */}
+          <button
+            onClick={toggleTracking}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-bold transition-all shadow-sm ${
+              isTrackingEnabled 
+                ? 'bg-green-500 hover:bg-green-600 text-white shadow-green-500/30' 
+                : 'bg-white/20 hover:bg-white/30 text-white/90'
+            }`}
+          >
+            <Power size={14} className={isTrackingEnabled ? "animate-pulse" : ""} />
+            {isTrackingEnabled ? 'Online' : 'Go Online'}
+          </button>
+          
+          <button onClick={refresh} className="bg-white/20 hover:bg-white/30 p-2 rounded-lg transition-colors ml-2">
             <RefreshCw size={16} />
           </button>
           <button onClick={() => { logout(); navigate('/'); }}
